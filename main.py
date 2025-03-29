@@ -9,9 +9,8 @@ from dotenv import load_dotenv
 HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY = range(5)
 user_data = {}
 
-# Клавиатура меню
 main_menu = ReplyKeyboardMarkup(
-    [[KeyboardButton("/start")], [KeyboardButton("/help")]],
+    [[KeyboardButton("/start"), KeyboardButton("/help"), KeyboardButton("/cancel")]],
     resize_keyboard=True
 )
 
@@ -24,12 +23,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Чтобы начать, нажмите /start и следуйте инструкциям.\n"
-        "Если хотите прервать — /cancel"
+        "Чтобы начать — нажмите /start и следуйте инструкциям.\n"
+        "Если хотите отменить — используйте /cancel.",
+        reply_markup=main_menu
     )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Диалог отменён. Введите /start чтобы начать заново.")
+    await update.message.reply_text(
+        "Диалог отменён. Введите /start, чтобы начать заново.",
+        reply_markup=main_menu
+    )
     return ConversationHandler.END
 
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,7 +41,8 @@ async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Теперь введите свой вес в кг:")
         return WEIGHT
     except ValueError:
-        await update.message.reply_text("Пожалуйста, введите корректное число (рост в см).")
+        await update.message.reply_text("Пожалуйста, введите число, например 175.")
+        return HEIGHT
 
 async def get_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -46,37 +50,49 @@ async def get_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите свой возраст:")
         return AGE
     except ValueError:
-        await update.message.reply_text("Пожалуйста, введите корректное число (вес в кг).")
+        await update.message.reply_text("Пожалуйста, введите число, например 70.")
+        return WEIGHT
 
 async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_data[update.effective_chat.id]["age"] = float(update.message.text)
         keyboard = [["Мужчина", "Женщина"]]
-        await update.message.reply_text("Укажите ваш пол:", reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True))
+        await update.message.reply_text(
+            "Укажите ваш пол:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        )
         return GENDER
     except ValueError:
         await update.message.reply_text("Пожалуйста, введите корректное число (возраст).")
+        return AGE
 
 async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gender = update.message.text
     if gender not in ["Мужчина", "Женщина"]:
-        await update.message.reply_text("Пожалуйста, выберите пол из предложенных вариантов.")
+        await update.message.reply_text("Пожалуйста, выберите пол из предложенных кнопок.")
         return GENDER
+
     user_data[update.effective_chat.id]["gender"] = gender
     keyboard = [["1", "2"], ["3", "4"], ["5"]]
     await update.message.reply_text(
         "Выберите уровень активности (1-5):\n"
         "1. Минимальный (1.2)\n"
-        "2. Легкая активность (1.375)\n"
+        "2. Лёгкая активность (1.375)\n"
         "3. Умеренная (1.55)\n"
-        "4. Высокая активность (1.725)\n"
+        "4. Высокая (1.725)\n"
         "5. Очень высокая (1.9)",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
     )
     return ACTIVITY
 
 async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    activity_map = {"1": 1.2, "2": 1.375, "3": 1.55, "4": 1.725, "5": 1.9}
+    activity_map = {
+        "1": 1.2,
+        "2": 1.375,
+        "3": 1.55,
+        "4": 1.725,
+        "5": 1.9
+    }
     choice = update.message.text
     if choice not in activity_map:
         await update.message.reply_text("Пожалуйста, выберите число от 1 до 5.")
@@ -101,13 +117,18 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif 25 <= imt <= 29.9:
         rec = f"Ваш ИМТ: {imt} (избыточный). Рекомендуемая калорийность: {round(tdee * 0.85)} ккал."
     else:
-        rec = f"Ваш ИМТ: {imt} (ожирение). Рекомендуемая калорийность: {round(tdee * 0.8)} ккал или {round(tdee * 0.75)} ккал для усиленного похудения."
+        rec = f"Ваш ИМТ: {imt} (ожирение). Рекомендуемая калорийность: {round(tdee * 0.8)} — {round(tdee * 0.75)} ккал."
 
-    await update.message.reply_text(f"{rec}\n\nСпасибо за использование бота!")
+    await update.message.reply_text(f"{rec}\n\nСпасибо за использование бота!", reply_markup=main_menu)
     return ConversationHandler.END
 
-# Запуск бота
-if __name__ == '__main__':
+async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Я не понял ваше сообщение. Чтобы начать — нажмите /start или /help.",
+        reply_markup=main_menu
+    )
+
+if __name__ == "__main__":
     load_dotenv()
     TOKEN = os.getenv("TOKEN")
 
@@ -122,11 +143,13 @@ if __name__ == '__main__':
             GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gender)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_activity)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)]
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
 
     print("Бот запущен...")
     app.run_polling()
