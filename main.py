@@ -2,11 +2,11 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, ConversationHandler, filters
 import os
 
-Состояния диалога
+#Состояния диалога
 
 HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY = range(5)
 
-Временное хранилище данных пользователя
+#Временное хранилище данных пользователя
 
 user_data = {}
 
