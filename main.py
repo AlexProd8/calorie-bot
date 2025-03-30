@@ -38,7 +38,14 @@ async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Введите свой рост в сантиметрах:")
         return HEIGHT
     elif "погода" in choice:
-        await update.message.reply_text("Введите город (например: Москва, Подольск, Луганск):")
+        keyboard = [
+            ["Москва", "Московская область", "Подольск"],
+            ["Луганск"]
+        ]
+        await update.message.reply_text(
+            "Выберите город для просмотра погоды:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        )
         return WEATHER
     else:
         await update.message.reply_text("Пожалуйста, выберите из меню.")
@@ -114,7 +121,7 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Минимальный (1.2)\n"
         "2. Лёгкая активность (1.375)\n"
         "3. Умеренная (1.55)\n"
-        "4. Высокая (1.725)\n"
+        "4. Высокая активность (1.725)\n"
         "5. Очень высокая (1.9)",
         reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
     )
