@@ -4,37 +4,72 @@ from telegram.ext import (
     ContextTypes, ConversationHandler, filters
 )
 import os
+import requests
 from dotenv import load_dotenv
 
-HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY = range(5)
+# Состояния
+MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, WEATHER = range(7)
 user_data = {}
 
 main_menu = ReplyKeyboardMarkup(
-    [[KeyboardButton("/start"), KeyboardButton("/help"), KeyboardButton("/cancel")]],
+    [[KeyboardButton("Рассчитать калории"), KeyboardButton("Посмотреть погоду")]],
     resize_keyboard=True
 )
 
+cities_supported = {
+    "москва": "Moscow",
+    "московская область": "Moscow",
+    "подольск": "Podolsk",
+    "луганск": "Luhansk"
+}
+
+API_KEY = "c5f217b58b1873233f26574264a75988"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Я помогу рассчитать твою норму калорий.\nВведите свой рост в сантиметрах:",
+        "Привет! Что вы хотите сделать?",
         reply_markup=main_menu
     )
-    return HEIGHT
+    return MENU
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Чтобы начать — нажмите /start и следуйте инструкциям.\n"
-        "Если хотите отменить — используйте /cancel.",
-        reply_markup=main_menu
-    )
+async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text.lower()
+    if "калории" in choice:
+        await update.message.reply_text("Введите свой рост в сантиметрах:")
+        return HEIGHT
+    elif "погода" in choice:
+        await update.message.reply_text("Введите город (например: Москва, Подольск, Луганск):")
+        return WEATHER
+    else:
+        await update.message.reply_text("Пожалуйста, выберите из меню.")
+        return MENU
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Диалог отменён. Введите /start, чтобы начать заново.",
-        reply_markup=main_menu
-    )
+# Погода
+async def get_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    city_input = update.message.text.strip().lower()
+    if city_input in cities_supported:
+        city = cities_supported[city_input]
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric&lang=ru"
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            weather = data['weather'][0]['description'].capitalize()
+            temp = data['main']['temp']
+            feels = data['main']['feels_like']
+            humidity = data['main']['humidity']
+            await update.message.reply_text(
+                f"Погода в {city_input.title()}:\n"
+                f"{weather}, температура: {temp}°C\n"
+                f"Ощущается как: {feels}°C\n"
+                f"Влажность: {humidity}%"
+            )
+        else:
+            await update.message.reply_text("Не удалось получить данные о погоде.")
+    else:
+        await update.message.reply_text("Пока поддерживаются только: Москва, Московская область, Подольск, Луганск.")
     return ConversationHandler.END
 
+# КАЛОРИИ
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_data[update.effective_chat.id] = {"height": float(update.message.text)}
@@ -87,11 +122,7 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     activity_map = {
-        "1": 1.2,
-        "2": 1.375,
-        "3": 1.55,
-        "4": 1.725,
-        "5": 1.9
+        "1": 1.2, "2": 1.375, "3": 1.55, "4": 1.725, "5": 1.9
     }
     choice = update.message.text
     if choice not in activity_map:
@@ -124,32 +155,30 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Я не понял ваше сообщение. Чтобы начать — нажмите /start или /help.",
+        "Я не понял ваше сообщение. Пожалуйста, выберите действие из меню.",
         reply_markup=main_menu
     )
 
 if __name__ == "__main__":
     load_dotenv()
     TOKEN = os.getenv("TOKEN")
-
     app = ApplicationBuilder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
+            MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_choice)],
             HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_height)],
             WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)],
             AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_age)],
             GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gender)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_activity)],
+            WEATHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weather)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[]
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
-
     print("Бот запущен...")
     app.run_polling()
