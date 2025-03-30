@@ -13,10 +13,11 @@ MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY = range(6)
 user_data = {}
 
 supported = {
-    "москва": "Moscow",
-    "московская область": "Moscow",
-    "подольск": "Podolsk",
-    "луганск": "Luhansk"
+    supported = {
+    "москва": "Moscow,ru",
+    "московская область": "Moscow,ru",
+    "подольск": "Podolsk,ru",
+    "луганск": "Luhansk,ua"
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
