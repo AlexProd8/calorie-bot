@@ -12,7 +12,7 @@ MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 
 # Ссылки на видео дня
 VIDEOS = {
-    "1": "https://vm.tiktok.com/ZMBaR1Vs1/",
+    "1": "https://vm.tiktok.com/ZMBaAoLQ8/",
     "2": "https://vm.tiktok.com/ZMBaRR3UG/",
     "3": "https://vm.tiktok.com/ZMBaRFVUd/",
     "4": "https://vm.tiktok.com/ZMBaR8BCM/",
