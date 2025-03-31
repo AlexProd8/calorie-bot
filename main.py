@@ -7,40 +7,82 @@ import os
 from dotenv import load_dotenv
 
 # Состояния
-HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY = range(5)
+MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 user_data = {}
+
+# Ссылки на видео дня
+videos = {
+    "1": "https://vm.tiktok.com/ZMBaR1Vs1/",
+    "2": "https://vm.tiktok.com/ZMBaRR3UG/",
+    "3": "https://vm.tiktok.com/ZMBaRFVUd/",
+    "4": "https://vm.tiktok.com/ZMBaR8BCM/",
+    "5": "https://vm.tiktok.com/ZMBaR1WXU/"
+}
 
 # Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я помогу рассчитать твою норму калорий.\nВведите свой рост в сантиметрах:")
-    return HEIGHT
+    keyboard = [["Рассчитать калории"], ["Видео дня"]]
+    await update.message.reply_text(
+        "Привет! Что вы хотите сделать?",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    )
+    return MENU
 
-# Рост
+# Главное меню
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+    if "калори" in text:
+        await update.message.reply_text("Введите ваш рост в сантиметрах:")
+        return HEIGHT
+    elif "видео" in text:
+        await update.message.reply_text("Выберите число от 1 до 5:")
+        return VIDEO
+    else:
+        await update.message.reply_text("Пожалуйста, выберите действие из меню.")
+        return MENU
+
+# Видео дня
+async def video_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text.strip()
+    if choice not in videos:
+        await update.message.reply_text("Пожалуйста, выберите цифру от 1 до 5.")
+        return VIDEO
+
+    link = videos[choice]
+    message = (
+        f"Ваше видео дня:\n{link}\n\n"
+        "Если у вас нет доступа к TikTok/Instagram, отправьте эту ссылку боту "
+        "@SaveAsBot, и он пришлёт вам видео прямо здесь."
+    )
+    await update.message.reply_text(message)
+    return MENU
+
+# Ввод роста
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[update.effective_chat.id] = {"height": float(update.message.text)}
     await update.message.reply_text("Теперь введите свой вес в кг:")
     return WEIGHT
 
-# Вес
+# Ввод веса
 async def get_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[update.effective_chat.id]["weight"] = float(update.message.text)
     await update.message.reply_text("Введите свой возраст:")
     return AGE
 
-# Возраст
+# Ввод возраста
 async def get_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[update.effective_chat.id]["age"] = float(update.message.text)
-    keyboard = [["Мужчина", "Женщина"]]
+    reply_keyboard = [["Мужчина", "Женщина"]]
     await update.message.reply_text(
         "Укажите ваш пол:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
     )
     return GENDER
 
-# Пол
+# Ввод пола
 async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[update.effective_chat.id]["gender"] = update.message.text
-    keyboard = [["1", "2"], ["3", "4"], ["5"]]
+    reply_keyboard = [["1", "2"], ["3", "4"], ["5"]]
     await update.message.reply_text(
         "Выберите уровень активности (1-5):\n"
         "1. Минимальный (1.2)\n"
@@ -48,11 +90,11 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. Умеренная (1.55)\n"
         "4. Высокая активность (1.725)\n"
         "5. Очень высокая (1.9)",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
     )
     return ACTIVITY
 
-# Активность
+# Ввод активности и расчёт
 async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[update.effective_chat.id]["activity"] = float({
         "1": 1.2, "2": 1.375, "3": 1.55, "4": 1.725, "5": 1.9
@@ -85,7 +127,7 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rec = f"Ваш ИМТ: {imt} (ожирение). Рекомендуемая калорийность: {round(tdee * 0.8)} ккал или {round(tdee * 0.75)} ккал для усиленного похудения."
 
     await update.message.reply_text(f"{rec}\n\nСпасибо за использование бота!")
-    return ConversationHandler.END
+    return MENU
 
 # Отмена
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -101,11 +143,13 @@ if __name__ == "__main__":
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
+            MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu)],
             HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_height)],
             WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)],
             AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_age)],
             GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gender)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_activity)],
+            VIDEO: [MessageHandler(filters.TEXT & ~filters.COMMAND, video_day)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
