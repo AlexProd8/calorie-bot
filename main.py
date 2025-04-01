@@ -3,7 +3,9 @@ import os
 import tempfile
 import traceback
 import requests  # для прямого скачивания медиа
-from telegram import Update, ReplyKeyboardMarkup
+import mimetypes
+from io import BytesIO
+from telegram import Update, ReplyKeyboardMarkup, InputFile
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -259,19 +261,25 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_photo(photo=media_file)
                 else:
                     await update.message.reply_document(document=media_file)
-    except Exception as e:
+    except Exception:
         logger.error("Ошибка при скачивании через yt-dlp:\n%s", traceback.format_exc())
         # Если yt-dlp не смог – пытаемся скачать напрямую через requests
         try:
             response = requests.get(expanded_url, timeout=15)
             response.raise_for_status()
             content_type = response.headers.get('Content-Type', '').lower()
+            ext = mimetypes.guess_extension(content_type)
+            if not ext:
+                ext = ".bin"
+            filename = "downloaded_file" + ext
+            file_stream = BytesIO(response.content)
+            file_stream.name = filename
             if 'image' in content_type:
-                await update.message.reply_photo(photo=response.content)
+                await update.message.reply_photo(photo=file_stream)
             elif 'video' in content_type:
-                await update.message.reply_video(video=response.content)
+                await update.message.reply_video(video=file_stream)
             else:
-                await update.message.reply_document(document=response.content)
+                await update.message.reply_document(document=file_stream, filename=filename)
         except Exception:
             logger.error("Ошибка при скачивании напрямую:\n%s", traceback.format_exc())
             await update.message.reply_text(
