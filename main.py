@@ -13,8 +13,7 @@ from telegram.ext import (
 )
 from yt_dlp import YoutubeDL
 
-# Если вы разворачиваете на Railway и задаёте переменные окружения там,
-# можно просто получить токен через os.environ:
+# Получаем токен из переменных окружения (Railway задаёт их через интерфейс)
 TOKEN = os.environ.get("TOKEN")
 
 # Настройка логирования
@@ -30,7 +29,6 @@ MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 # Текст для возврата в меню
 BACK_TO_MENU = "В меню"
 
-# Формирование клавиатуры главного меню с тремя кнопками
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
         [["Рассчитать калории"],
@@ -39,7 +37,6 @@ def main_menu_keyboard():
         one_time_keyboard=True, resize_keyboard=True
     )
 
-# Универсальная проверка: если введён "В меню" — возвращаем главное меню
 async def check_back_to_menu(text: str, update: Update):
     if text.strip().lower() == BACK_TO_MENU.lower():
         await update.message.reply_text(
@@ -49,7 +46,6 @@ async def check_back_to_menu(text: str, update: Update):
         return True
     return False
 
-# Команда /start – запуск диалога
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
@@ -58,30 +54,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
-# Обработчик главного меню
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
-
-    # Если пользователь выбрал "Рассчитать калории"
     if "калори" in text:
         await update.message.reply_text(
             "Введите ваш рост в сантиметрах:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return HEIGHT
-    # Если выбрана опция "Видео по вашей ссылке"
     elif "ссыл" in text:
         await update.message.reply_text(
             "Отправьте ссылку на видео с TikTok или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
-    # Если выбрана опция "Информация"
     elif "информа" in text:
         info_text = (
             "Это бот, который умеет:\n"
             "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
-            "• Загружать видео с TikTok и Instagram по вашей ссылке.\n\n"
+            "• Загружать видео или изображения с TikTok и Instagram по вашей ссылке.\n\n"
             "Чтобы использовать бота, выберите нужную функцию в меню.\n\n"
             "Разработчик – AlexProd.\n"
             "Спасибо что используете бота."
@@ -95,7 +86,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# Функции для расчёта калорий (без изменений)
+# Функции расчёта калорий (без изменений)
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -204,44 +195,52 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
-# Новый режим: обработка видео по ссылке пользователя
-# Режим остаётся активным до тех пор, пока пользователь не введёт "В меню"
+# Новый режим: обработка ссылки для скачивания видео или изображения
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
+
     # Проверяем, что ссылка начинается с "http"
     if not text.startswith("http"):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
+
     # Проверяем, что ссылка принадлежит TikTok или Instagram
     if "tiktok.com" not in text and "instagram.com" not in text:
         await update.message.reply_text(
-            "Я могу отправлять видео только с TikTok или Instagram. Попробуйте другую ссылку."
+            "Я могу отправлять медиа только с TikTok или Instagram. Попробуйте другую ссылку."
         )
         return VIDEO
-    await update.message.reply_text("Скачиваю видео, пожалуйста, подождите...")
+
+    await update.message.reply_text("Скачиваю медиа, пожалуйста, подождите...")
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
             ydl_opts = {
                 'outtmpl': os.path.join(tmpdirname, '%(id)s.%(ext)s'),
-                'format': 'mp4',
+                'format': 'mp4',  # yt-dlp выберет подходящий формат
                 'quiet': True,
             }
             with YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(text, download=True)
                 filename = ydl.prepare_filename(info_dict)
-            with open(filename, 'rb') as video_file:
-                await update.message.reply_video(video=video_file)
+
+            ext = os.path.splitext(filename)[1].lower()
+            with open(filename, 'rb') as media_file:
+                if ext in ['.mp4', '.mov', '.mkv']:
+                    await update.message.reply_video(video=media_file)
+                elif ext in ['.jpg', '.jpeg', '.png']:
+                    await update.message.reply_photo(photo=media_file)
+                else:
+                    await update.message.reply_document(document=media_file)
     except Exception:
-        logger.error("Ошибка при скачивании видео:\n%s", traceback.format_exc())
-        await update.message.reply_text("Не удалось скачать видео. Возможно, ссылка недоступна или некорректна.")
+        logger.error("Ошибка при скачивании медиа:\n%s", traceback.format_exc())
+        await update.message.reply_text("Не удалось скачать медиа. Возможно, ссылка недоступна или некорректна.")
     await update.message.reply_text(
         "Если хотите, отправьте другую ссылку или нажмите 'В меню' для возврата в главное меню."
     )
     return VIDEO
 
-# Обработчик отмены диалога
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Диалог отменён. Введите /start, чтобы начать заново.")
     return ConversationHandler.END
