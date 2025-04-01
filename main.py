@@ -65,18 +65,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return HEIGHT
     elif "ссыл" in text:
         await update.message.reply_text(
-            "Отправьте ссылку на видео или изображение с TikTok или Instagram:",
+            "Отправьте ссылку на видео или изображение с TikTok, YouTube Shorts или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
     elif "информа" in text:
         info_text = (
             "Это бот, который умеет:\n"
-            "• Рассчитывать норму калорий.\n"
-            "• Загружать видео или изображения с TikTok и Instagram по вашей ссылке.\n\n"
+            "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
+            "• Загружать видео или изображения с TikTok, YouTube Shorts и Instagram по вашей ссылке.\n\n"
             "Чтобы использовать бота, выберите нужную функцию в меню.\n\n"
             "Разработчик – AlexProd.\n"
-            "Спасибо что используете бота."
+            "Спасибо, что используете бота."
         )
         await update.message.reply_text(info_text, reply_markup=main_menu_keyboard())
         return MENU
@@ -87,7 +87,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# --- Функции расчёта калорий (без изменений) ---
+# Функции для расчёта калорий (без изменений)
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -222,9 +222,11 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
 
-    if "tiktok.com" not in text and "instagram.com" not in text:
+    # Проверяем, что ссылка принадлежит одному из разрешённых источников:
+    allowed_sources = ["tiktok.com", "instagram.com", "youtube.com", "youtu.be"]
+    if not any(domain in text for domain in allowed_sources):
         await update.message.reply_text(
-            "Я могу обрабатывать только TikTok или Instagram. Попробуйте другую ссылку."
+            "Я могу обрабатывать только TikTok, YouTube Shorts или Instagram. Попробуйте другую ссылку."
         )
         return VIDEO
 
