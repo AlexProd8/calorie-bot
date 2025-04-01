@@ -2,7 +2,6 @@ import logging
 import os
 import tempfile
 import traceback
-from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,9 +13,9 @@ from telegram.ext import (
 )
 from yt_dlp import YoutubeDL
 
-# Загружаем переменные окружения из .env
-load_dotenv()
-TOKEN = os.getenv("TOKEN")
+# Если вы разворачиваете на Railway и задаёте переменные окружения там,
+# можно просто получить токен через os.environ:
+TOKEN = os.environ.get("TOKEN")
 
 # Настройка логирования
 logging.basicConfig(
@@ -25,20 +24,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Определяем состояния диалога
+# Состояния диалога
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 
 # Текст для возврата в меню
 BACK_TO_MENU = "В меню"
 
-# Функция для формирования клавиатуры главного меню
+# Формирование клавиатуры главного меню с тремя кнопками
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
-        [["Рассчитать калории"], ["Видео по вашей ссылке"]],
+        [["Рассчитать калории"],
+         ["Видео по вашей ссылке"],
+         ["Информация"]],
         one_time_keyboard=True, resize_keyboard=True
     )
 
-# Универсальная проверка: если пользователь ввёл "В меню", возвращаем главное меню
+# Универсальная проверка: если введён "В меню" — возвращаем главное меню
 async def check_back_to_menu(text: str, update: Update):
     if text.strip().lower() == BACK_TO_MENU.lower():
         await update.message.reply_text(
@@ -60,18 +61,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Обработчик главного меню
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
+
+    # Если пользователь выбрал "Рассчитать калории"
     if "калори" in text:
         await update.message.reply_text(
             "Введите ваш рост в сантиметрах:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return HEIGHT
-    elif "ссыл" in text:  # если в тексте присутствует слово «ссылка»
+    # Если выбрана опция "Видео по вашей ссылке"
+    elif "ссыл" in text:
         await update.message.reply_text(
             "Отправьте ссылку на видео с TikTok или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
+    # Если выбрана опция "Информация"
+    elif "информа" in text:
+        info_text = (
+            "Это бот, который умеет:\n"
+            "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
+            "• Загружать видео с TikTok и Instagram по вашей ссылке.\n\n"
+            "Чтобы использовать бота, выберите нужную функцию в меню.\n\n"
+            "Разработчик – AlexProd.\n"
+            "Спасибо что используете бота."
+        )
+        await update.message.reply_text(info_text, reply_markup=main_menu_keyboard())
+        return MENU
     else:
         await update.message.reply_text(
             "Пожалуйста, выберите действие из меню.",
@@ -79,8 +95,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# Функции для расчёта калорий (остались без изменений)
-
+# Функции для расчёта калорий (без изменений)
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -189,12 +204,13 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
-# Новая функция: обработка видео по ссылке пользователя
+# Новый режим: обработка видео по ссылке пользователя
+# Режим остаётся активным до тех пор, пока пользователь не введёт "В меню"
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
-    # Проверяем, что введённый текст начинается с "http"
+    # Проверяем, что ссылка начинается с "http"
     if not text.startswith("http"):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
