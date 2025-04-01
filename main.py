@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 import traceback
-import requests  # для раскрытия коротких ссылок
+import requests  # для прямого скачивания медиа
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -85,7 +85,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# Функции расчёта калорий (без изменений)
+# --- Функции расчёта калорий (без изменений) ---
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -200,12 +200,17 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MENU
 
 def expand_url(url: str) -> str:
+    """
+    Раскрывает короткую ссылку (например, vm.tiktok.com) с помощью HEAD-запроса.
+    Если не удалось, возвращает исходную ссылку.
+    """
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
         return r.url
     except:
         return url
 
+# Обработчик ссылки с fallback (вариант B)
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -238,6 +243,7 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'noprogress': True
     }
 
+    # Попытка через yt-dlp
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
             ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(id)s.%(ext)s')
@@ -253,11 +259,24 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_photo(photo=media_file)
                 else:
                     await update.message.reply_document(document=media_file)
-    except Exception:
-        logger.error("Ошибка при скачивании медиа:\n%s", traceback.format_exc())
-        await update.message.reply_text(
-            "Не удалось скачать медиа. Возможно, видео/изображение недоступно, ссылка неправильная или заблокирована в регионе."
-        )
+    except Exception as e:
+        logger.error("Ошибка при скачивании через yt-dlp:\n%s", traceback.format_exc())
+        # Если yt-dlp не смог – пытаемся скачать напрямую через requests
+        try:
+            response = requests.get(expanded_url, timeout=15)
+            response.raise_for_status()
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'image' in content_type:
+                await update.message.reply_photo(photo=response.content)
+            elif 'video' in content_type:
+                await update.message.reply_video(video=response.content)
+            else:
+                await update.message.reply_document(document=response.content)
+        except Exception:
+            logger.error("Ошибка при скачивании напрямую:\n%s", traceback.format_exc())
+            await update.message.reply_text(
+                "Не удалось скачать медиа ни через yt-dlp, ни напрямую. Возможно, ссылка неправильная или недоступна."
+            )
 
     await update.message.reply_text(
         "Если хотите, отправьте другую ссылку или нажмите 'В меню' для возврата в главное меню."
