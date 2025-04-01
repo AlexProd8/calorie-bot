@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 import traceback
-import requests  # <-- для раскрытия коротких ссылок
+import requests  # для раскрытия коротких ссылок
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,14 +14,17 @@ from telegram.ext import (
 )
 from yt_dlp import YoutubeDL
 
+# Получаем токен из переменных окружения (Railway задаёт его через настройки)
 TOKEN = os.environ.get("TOKEN")
 
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# Состояния диалога
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 BACK_TO_MENU = "В меню"
 
@@ -82,7 +85,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# --- Функции для расчёта калорий (не меняем) ---
+# Функции расчёта калорий (без изменений)
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -196,31 +199,22 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
-# --- Функция раскрытия короткой ссылки ---
 def expand_url(url: str) -> str:
-    """
-    Пытаемся раскрыть короткую ссылку (например, vm.tiktok.com)
-    с помощью HEAD-запроса. Если что-то пойдёт не так,
-    вернём исходную ссылку.
-    """
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
         return r.url
     except:
         return url
 
-# --- Обработка ссылок (TikTok/Instagram), включая видео или изображения ---
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
 
-    # Проверка, что это вообще ссылка
     if not text.startswith("http"):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
 
-    # Проверяем, что ссылка принадлежит TikTok или Instagram
     if "tiktok.com" not in text and "instagram.com" not in text:
         await update.message.reply_text(
             "Я могу обрабатывать только TikTok или Instagram. Попробуйте другую ссылку."
@@ -228,11 +222,8 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return VIDEO
 
     await update.message.reply_text("Скачиваю медиа, пожалуйста, подождите...")
-
-    # Раскрываем короткую ссылку (если это vm.tiktok.com и т.п.)
     expanded_url = expand_url(text)
 
-    # Настройки для yt-dlp с указанием User-Agent и других опций
     ydl_opts = {
         'outtmpl': '%(id)s.%(ext)s',
         'format': 'mp4',
@@ -242,8 +233,8 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                           '(KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36',
             'Referer': 'https://www.tiktok.com/'
         },
-        'geo_bypass': True,           # Пытаться обойти геоблокировку
-        'geo_bypass_country': 'US',   # Пробовать прикинуться, что мы из США
+        'geo_bypass': True,
+        'geo_bypass_country': 'US',
         'noprogress': True
     }
 
@@ -254,21 +245,18 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 info_dict = ydl.extract_info(expanded_url, download=True)
                 filename = ydl.prepare_filename(info_dict)
 
-            # Определяем расширение файла
             ext = os.path.splitext(filename)[1].lower()
             with open(filename, 'rb') as media_file:
                 if ext in ['.mp4', '.mov', '.mkv', '.webm']:
                     await update.message.reply_video(video=media_file)
-                elif ext in ['.jpg', '.jpeg', '.png']:
+                elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
                     await update.message.reply_photo(photo=media_file)
                 else:
                     await update.message.reply_document(document=media_file)
-
-    except Exception as e:
+    except Exception:
         logger.error("Ошибка при скачивании медиа:\n%s", traceback.format_exc())
         await update.message.reply_text(
-            "Не удалось скачать медиа. Возможно, видео/изображение недоступно, "
-            "ссылка неправильная или заблокирована в регионе."
+            "Не удалось скачать медиа. Возможно, видео/изображение недоступно, ссылка неправильная или заблокирована в регионе."
         )
 
     await update.message.reply_text(
