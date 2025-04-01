@@ -16,7 +16,7 @@ VIDEOS = {
     "2": "https://vm.tiktok.com/ZMBaRR3UG/",
     "3": "https://vm.tiktok.com/ZMBaRFVUd/",
     "4": "https://vm.tiktok.com/ZMBaR8BCM/",
-    "5": "https://vm.tiktok.com/ZMBaR1WXU/"
+    "5": "https://www.instagram.com/reel/DHOi50zoiUy/?igsh=d2Nsd2h5YnE3bjNp"
 }
 
 BACK_TO_MENU = "В меню"
