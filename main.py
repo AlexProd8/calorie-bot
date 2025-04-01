@@ -2,10 +2,10 @@ import logging
 import os
 import tempfile
 import traceback
-import requests  # для прямого скачивания медиа
+import requests  # для fallback-скачивания медиа
 import mimetypes
 from io import BytesIO
-from telegram import Update, ReplyKeyboardMarkup, InputFile
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -19,14 +19,13 @@ from yt_dlp import YoutubeDL
 # Получаем токен из переменных окружения (Railway задаёт его через настройки)
 TOKEN = os.environ.get("TOKEN")
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Состояния диалога
+# Определяем состояния диалога
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 BACK_TO_MENU = "В меню"
 
@@ -65,7 +64,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return HEIGHT
     elif "ссыл" in text:
         await update.message.reply_text(
-            "Отправьте ссылку на видео или изображение с TikTok, YouTube Shorts или Instagram:",
+            "Отправьте ссылку на видео с TikTok или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
@@ -73,7 +72,9 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info_text = (
             "Это бот, который умеет:\n"
             "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
-            "• Загружать видео или изображения с TikTok, YouTube Shorts и Instagram по вашей ссылке.\n\n"
+            "• Загружать видео с TikTok и Instagram по вашей ссылке.\n\n"
+            "Обратите внимание: бот пока не умеет скачивать картинки с Instagram и TikTok. \n"
+            "Если вы отправите ссылку на изображение, бот ответит, что эта функция в разработке (AlexProd старается добавить её в будущем).\n\n"
             "Чтобы использовать бота, выберите нужную функцию в меню.\n\n"
             "Разработчик – AlexProd.\n"
             "Спасибо, что используете бота."
@@ -87,7 +88,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# Функции для расчёта калорий (без изменений)
+# --- Функции расчёта калорий (оставляем без изменений) ---
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -203,7 +204,7 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def expand_url(url: str) -> str:
     """
-    Раскрывает короткую ссылку (например, vm.tiktok.com) с помощью HEAD-запроса.
+    Раскрывает короткую ссылку (например, vm.tiktok.com) через HEAD-запрос.
     Если не удалось, возвращает исходную ссылку.
     """
     try:
@@ -212,8 +213,14 @@ def expand_url(url: str) -> str:
     except:
         return url
 
-# Обработчик ссылки с fallback (вариант B)
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Обработка ссылки с fallback:
+    - Сначала пытаемся скачать медиа через yt-dlp.
+    - Если скачивается видео, отправляем его.
+    - Если файл имеет расширение изображения, отправляем сообщение о том, что функция скачивания изображений пока не реализована.
+    - В случае ошибки yt-dlp, для TikTok/Instagram пытаемся fallback через requests (но для изображений тоже отправляем уведомление).
+    """
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
@@ -222,16 +229,22 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
 
-    # Проверяем, что ссылка принадлежит одному из разрешённых источников:
-    allowed_sources = ["tiktok.com", "instagram.com", "youtube.com", "youtu.be"]
+    # Проверяем, что ссылка принадлежит TikTok или Instagram
+    allowed_sources = ["tiktok.com", "instagram.com"]
     if not any(domain in text for domain in allowed_sources):
         await update.message.reply_text(
-            "Я могу обрабатывать только TikTok, YouTube Shorts или Instagram. Попробуйте другую ссылку."
+            "Я могу обрабатывать только ссылки с TikTok или Instagram. Попробуйте другую ссылку."
         )
         return VIDEO
 
     await update.message.reply_text("Скачиваю медиа, пожалуйста, подождите...")
     expanded_url = expand_url(text)
+
+    # Настраиваем Referer в зависимости от сервиса
+    if "instagram.com" in expanded_url:
+        referer = "https://www.instagram.com/"
+    else:
+        referer = "https://www.tiktok.com/"
 
     ydl_opts = {
         'outtmpl': '%(id)s.%(ext)s',
@@ -240,14 +253,13 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                           '(KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36',
-            'Referer': 'https://www.tiktok.com/'
+            'Referer': referer
         },
         'geo_bypass': True,
         'geo_bypass_country': 'US',
         'noprogress': True
     }
 
-    # Попытка через yt-dlp
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
             ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(id)s.%(ext)s')
@@ -256,32 +268,42 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 filename = ydl.prepare_filename(info_dict)
 
             ext = os.path.splitext(filename)[1].lower()
-            with open(filename, 'rb') as media_file:
-                if ext in ['.mp4', '.mov', '.mkv', '.webm']:
+            # Если расширение соответствует видео, отправляем видео
+            if ext in ['.mp4', '.mov', '.mkv', '.webm']:
+                with open(filename, 'rb') as media_file:
                     await update.message.reply_video(video=media_file)
-                elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                    await update.message.reply_photo(photo=media_file)
-                else:
+            # Если расширение соответствует изображению – сообщаем, что функция в разработке
+            elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                await update.message.reply_text(
+                    "Бот пока что не может скачать картинки с Instagram и TikTok, но AlexProd старается и в будущем добавит эту возможность."
+                )
+            else:
+                with open(filename, 'rb') as media_file:
                     await update.message.reply_document(document=media_file)
     except Exception:
         logger.error("Ошибка при скачивании через yt-dlp:\n%s", traceback.format_exc())
-        # Если yt-dlp не смог – пытаемся скачать напрямую через requests
+        # Fallback для TikTok/Instagram через requests (попытка)
         try:
             response = requests.get(expanded_url, timeout=15)
             response.raise_for_status()
             content_type = response.headers.get('Content-Type', '').lower()
-            ext = mimetypes.guess_extension(content_type)
-            if not ext:
-                ext = ".bin"
-            filename = "downloaded_file" + ext
-            file_stream = BytesIO(response.content)
-            file_stream.name = filename
+            # Если контент указывает на изображение, отправляем уведомление
             if 'image' in content_type:
-                await update.message.reply_photo(photo=file_stream)
+                await update.message.reply_text(
+                    "Бот пока что не может скачать картинки с Instagram и TikTok, но AlexProd старается и в будущем добавит эту возможность."
+                )
             elif 'video' in content_type:
+                ext = mimetypes.guess_extension(content_type)
+                if not ext:
+                    ext = ".mp4"
+                filename = "downloaded_file" + ext
+                file_stream = BytesIO(response.content)
+                file_stream.name = filename
                 await update.message.reply_video(video=file_stream)
             else:
-                await update.message.reply_document(document=file_stream, filename=filename)
+                await update.message.reply_text(
+                    "Не удалось определить тип медиа. Возможно, ссылка неправильная или недоступна."
+                )
         except Exception:
             logger.error("Ошибка при скачивании напрямую:\n%s", traceback.format_exc())
             await update.message.reply_text(
