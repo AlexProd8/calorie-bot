@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 import traceback
+import requests  # <-- для раскрытия коротких ссылок
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -13,20 +14,15 @@ from telegram.ext import (
 )
 from yt_dlp import YoutubeDL
 
-# Получаем токен из переменных окружения (Railway задаёт их через интерфейс)
 TOKEN = os.environ.get("TOKEN")
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Состояния диалога
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
-
-# Текст для возврата в меню
 BACK_TO_MENU = "В меню"
 
 def main_menu_keyboard():
@@ -64,14 +60,14 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return HEIGHT
     elif "ссыл" in text:
         await update.message.reply_text(
-            "Отправьте ссылку на видео с TikTok или Instagram:",
+            "Отправьте ссылку на видео или изображение с TikTok или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
     elif "информа" in text:
         info_text = (
             "Это бот, который умеет:\n"
-            "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
+            "• Рассчитывать норму калорий.\n"
             "• Загружать видео или изображения с TikTok и Instagram по вашей ссылке.\n\n"
             "Чтобы использовать бота, выберите нужную функцию в меню.\n\n"
             "Разработчик – AlexProd.\n"
@@ -86,7 +82,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# Функции расчёта калорий (без изменений)
+# --- Функции для расчёта калорий (не меняем) ---
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -174,13 +170,17 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except KeyError:
         await update.message.reply_text("Данные введены не полностью. Попробуйте заново командой /start.")
         return ConversationHandler.END
+
     height_m = height / 100
     imt = round(weight / (height_m ** 2), 2)
+
     if gender == "Мужчина":
         bmr = round((10 * weight) + (6.25 * height - 5 * age + 5))
     else:
         bmr = round((10 * weight) + (6.25 * height - 5 * age - 161))
+
     tdee = round(bmr * activity)
+
     if imt < 18.5:
         rec = f"Ваш ИМТ: {imt} (недостаток). Рекомендуемая калорийность: {round(tdee * 1.15)} ккал."
     elif 18.5 <= imt <= 24.9:
@@ -189,19 +189,33 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rec = f"Ваш ИМТ: {imt} (избыточный). Рекомендуемая калорийность: {round(tdee * 0.85)} ккал."
     else:
         rec = f"Ваш ИМТ: {imt} (ожирение). Рекомендуемая калорийность: {round(tdee * 0.8)} ккал или {round(tdee * 0.75)} ккал для усиленного похудения."
+
     await update.message.reply_text(
         f"{rec}\n\nСпасибо за использование бота!",
         reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
     )
     return MENU
 
-# Новый режим: обработка ссылки для скачивания видео или изображения
+# --- Функция раскрытия короткой ссылки ---
+def expand_url(url: str) -> str:
+    """
+    Пытаемся раскрыть короткую ссылку (например, vm.tiktok.com)
+    с помощью HEAD-запроса. Если что-то пойдёт не так,
+    вернём исходную ссылку.
+    """
+    try:
+        r = requests.head(url, allow_redirects=True, timeout=10)
+        return r.url
+    except:
+        return url
+
+# --- Обработка ссылок (TikTok/Instagram), включая видео или изображения ---
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
 
-    # Проверяем, что ссылка начинается с "http"
+    # Проверка, что это вообще ссылка
     if not text.startswith("http"):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
@@ -209,33 +223,54 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, что ссылка принадлежит TikTok или Instagram
     if "tiktok.com" not in text and "instagram.com" not in text:
         await update.message.reply_text(
-            "Я могу отправлять медиа только с TikTok или Instagram. Попробуйте другую ссылку."
+            "Я могу обрабатывать только TikTok или Instagram. Попробуйте другую ссылку."
         )
         return VIDEO
 
     await update.message.reply_text("Скачиваю медиа, пожалуйста, подождите...")
+
+    # Раскрываем короткую ссылку (если это vm.tiktok.com и т.п.)
+    expanded_url = expand_url(text)
+
+    # Настройки для yt-dlp с указанием User-Agent и других опций
+    ydl_opts = {
+        'outtmpl': '%(id)s.%(ext)s',
+        'format': 'mp4',
+        'quiet': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                          '(KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36',
+            'Referer': 'https://www.tiktok.com/'
+        },
+        'geo_bypass': True,           # Пытаться обойти геоблокировку
+        'geo_bypass_country': 'US',   # Пробовать прикинуться, что мы из США
+        'noprogress': True
+    }
+
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
-            ydl_opts = {
-                'outtmpl': os.path.join(tmpdirname, '%(id)s.%(ext)s'),
-                'format': 'mp4',  # yt-dlp выберет подходящий формат
-                'quiet': True,
-            }
+            ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(id)s.%(ext)s')
             with YoutubeDL(ydl_opts) as ydl:
-                info_dict = ydl.extract_info(text, download=True)
+                info_dict = ydl.extract_info(expanded_url, download=True)
                 filename = ydl.prepare_filename(info_dict)
 
+            # Определяем расширение файла
             ext = os.path.splitext(filename)[1].lower()
             with open(filename, 'rb') as media_file:
-                if ext in ['.mp4', '.mov', '.mkv']:
+                if ext in ['.mp4', '.mov', '.mkv', '.webm']:
                     await update.message.reply_video(video=media_file)
                 elif ext in ['.jpg', '.jpeg', '.png']:
                     await update.message.reply_photo(photo=media_file)
                 else:
                     await update.message.reply_document(document=media_file)
-    except Exception:
+
+    except Exception as e:
         logger.error("Ошибка при скачивании медиа:\n%s", traceback.format_exc())
-        await update.message.reply_text("Не удалось скачать медиа. Возможно, ссылка недоступна или некорректна.")
+        await update.message.reply_text(
+            "Не удалось скачать медиа. Возможно, видео/изображение недоступно, "
+            "ссылка неправильная или заблокирована в регионе."
+        )
+
     await update.message.reply_text(
         "Если хотите, отправьте другую ссылку или нажмите 'В меню' для возврата в главное меню."
     )
