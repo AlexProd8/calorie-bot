@@ -2,10 +2,10 @@ import logging
 import os
 import tempfile
 import traceback
-import requests  # для fallback-скачивания медиа
+import requests
 import mimetypes
 from io import BytesIO
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -25,17 +25,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Определяем состояния диалога
+# Состояния диалога
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
+CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT = range(7, 10)  # конвертация валют
+
 BACK_TO_MENU = "В меню"
+
+AVAILABLE_CURRENCIES = [
+    "RUB", "UZS", "BYN", "USD", "EUR", "CHF", "TJS", "KGS"
+]
 
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
-        [["Рассчитать калории"],
-         ["Видео по вашей ссылке"],
-         ["Информация"]],
-        one_time_keyboard=True, resize_keyboard=True
+        [
+            ["Рассчитать калории"],
+            ["Видео по вашей ссылке"],
+            ["Конвертация валют"],
+            ["Информация"]
+        ],
+        one_time_keyboard=True,
+        resize_keyboard=True
     )
+
+def currency_keyboard():
+    rows = []
+    row = []
+    for i, cur in enumerate(AVAILABLE_CURRENCIES, start=1):
+        row.append(cur)
+        if i % 3 == 0:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([BACK_TO_MENU])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 async def check_back_to_menu(text: str, update: Update):
     if text.strip().lower() == BACK_TO_MENU.lower():
@@ -46,6 +69,7 @@ async def check_back_to_menu(text: str, update: Update):
         return True
     return False
 
+# --- Старт и меню ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
@@ -72,15 +96,21 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info_text = (
             "Это бот, который умеет:\n"
             "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
-            "• Загружать видео с TikTok и Instagram по вашей ссылке.\n\n"
-            "Обратите внимание: бот пока не умеет скачивать картинки с Instagram и TikTok. \n"
-            "Если вы отправите ссылку на изображение, бот ответит, что эта функция в разработке (В будующем добавлю эту функцию).\n\n"
-            "Чтобы использовать бота, выберите нужную функцию в меню.\n\n"
+            "• Загружать видео с TikTok и Instagram по вашей ссылке.\n"
+            "• Конвертировать валюты.\n\n"
+            "Обратите внимание: бот пока не умеет скачивать картинки с Instagram и TikTok.\n"
+            "Если вы отправите ссылку на изображение, бот ответит, что эта функция в разработке (AlexProd старается добавить её в будущем).\n\n"
             "Разработчик – AlexProd.\n"
-            "Спасибо, что используете бота."
+            "Спасибо, что используете бота!"
         )
         await update.message.reply_text(info_text, reply_markup=main_menu_keyboard())
         return MENU
+    elif "валют" in text or "конвер" in text:
+        await update.message.reply_text(
+            "Выберите валюту, из которой конвертируем:",
+            reply_markup=currency_keyboard()
+        )
+        return CURRENCY_FROM
     else:
         await update.message.reply_text(
             "Пожалуйста, выберите действие из меню.",
@@ -202,11 +232,88 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
+# --- Функции для конвертации валют ---
+async def currency_from(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().upper()
+    if await check_back_to_menu(text, update):
+        return MENU
+    if text not in AVAILABLE_CURRENCIES:
+        await update.message.reply_text(
+            "Пожалуйста, выберите одну из доступных валют или нажмите 'В меню'.",
+            reply_markup=currency_keyboard()
+        )
+        return CURRENCY_FROM
+    context.user_data["currency_from"] = text
+    await update.message.reply_text(
+        f"Исходная валюта: {text}\nТеперь выберите валюту, в которую переводим:",
+        reply_markup=currency_keyboard()
+    )
+    return CURRENCY_TO
+
+async def currency_to(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().upper()
+    if await check_back_to_menu(text, update):
+        return MENU
+    if text not in AVAILABLE_CURRENCIES:
+        await update.message.reply_text(
+            "Пожалуйста, выберите одну из доступных валют или нажмите 'В меню'.",
+            reply_markup=currency_keyboard()
+        )
+        return CURRENCY_TO
+    context.user_data["currency_to"] = text
+    await update.message.reply_text(
+        f"Целевая валюта: {text}\nВведите сумму, которую нужно конвертировать:",
+        reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
+    )
+    return CURRENCY_AMOUNT
+
+async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if await check_back_to_menu(text, update):
+        return MENU
+    try:
+        amount = float(text)
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введите числовое значение суммы.")
+        return CURRENCY_AMOUNT
+    cur_from = context.user_data["currency_from"]
+    cur_to = context.user_data["currency_to"]
+    url = f"https://api.exchangerate.host/latest?base={cur_from}&symbols={cur_to}"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        if "rates" not in data or cur_to not in data["rates"]:
+            raise ValueError("Невалидный ответ API.")
+        rate = data["rates"][cur_to]
+        result = round(rate * amount, 2)
+        message = (
+            f"{amount} {cur_from} = {result} {cur_to}\n\n"
+            "Хотите выбрать другие валюты или вернуться в меню?"
+        )
+        keyboard = [["Выбрать валюты заново"], [BACK_TO_MENU]]
+        await update.message.reply_text(message, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    except Exception:
+        await update.message.reply_text("Ошибка при получении курса валют. Попробуйте позже.")
+        return MENU
+    return CURRENCY_AMOUNT
+
+async def currency_reselect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().lower()
+    if "заново" in text or "выбрать" in text or "валют" in text:
+        await update.message.reply_text(
+            "Выберите валюту, из которой конвертируем:",
+            reply_markup=currency_keyboard()
+        )
+        return CURRENCY_FROM
+    else:
+        await update.message.reply_text(
+            "Вы вернулись в главное меню. Что хотите сделать?",
+            reply_markup=main_menu_keyboard()
+        )
+        return MENU
+
+# --- Функции для обработки видео по ссылке ---
 def expand_url(url: str) -> str:
-    """
-    Раскрывает короткую ссылку (например, vm.tiktok.com) через HEAD-запрос.
-    Если не удалось, возвращает исходную ссылку.
-    """
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
         return r.url
@@ -214,38 +321,24 @@ def expand_url(url: str) -> str:
         return url
 
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Обработка ссылки с fallback:
-    - Сначала пытаемся скачать медиа через yt-dlp.
-    - Если скачивается видео, отправляем его.
-    - Если файл имеет расширение изображения, отправляем сообщение о том, что функция скачивания изображений пока не реализована.
-    - В случае ошибки yt-dlp, для TikTok/Instagram пытаемся fallback через requests (но для изображений тоже отправляем уведомление).
-    """
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
-
     if not text.startswith("http"):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
-
-    # Проверяем, что ссылка принадлежит TikTok или Instagram
     allowed_sources = ["tiktok.com", "instagram.com"]
     if not any(domain in text for domain in allowed_sources):
         await update.message.reply_text(
             "Я могу обрабатывать только ссылки с TikTok или Instagram. Попробуйте другую ссылку."
         )
         return VIDEO
-
     await update.message.reply_text("Скачиваю медиа, пожалуйста, подождите...")
     expanded_url = expand_url(text)
-
-    # Настраиваем Referer в зависимости от сервиса
     if "instagram.com" in expanded_url:
         referer = "https://www.instagram.com/"
     else:
         referer = "https://www.tiktok.com/"
-
     ydl_opts = {
         'outtmpl': '%(id)s.%(ext)s',
         'format': 'mp4',
@@ -259,39 +352,39 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'geo_bypass_country': 'US',
         'noprogress': True
     }
-
+    success = False
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
             ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(id)s.%(ext)s')
             with YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(expanded_url, download=True)
                 filename = ydl.prepare_filename(info_dict)
-
             ext = os.path.splitext(filename)[1].lower()
-            # Если расширение соответствует видео, отправляем видео
             if ext in ['.mp4', '.mov', '.mkv', '.webm']:
                 with open(filename, 'rb') as media_file:
                     await update.message.reply_video(video=media_file)
-            # Если расширение соответствует изображению – сообщаем, что функция в разработке
+                success = True
             elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
                 await update.message.reply_text(
                     "Бот пока что не может скачать картинки с Instagram и TikTok, но AlexProd старается и в будущем добавит эту возможность."
                 )
+                success = True
             else:
                 with open(filename, 'rb') as media_file:
                     await update.message.reply_document(document=media_file)
+                success = True
     except Exception:
         logger.error("Ошибка при скачивании через yt-dlp:\n%s", traceback.format_exc())
-        # Fallback для TikTok/Instagram через requests (попытка)
+    if not success:
         try:
             response = requests.get(expanded_url, timeout=15)
             response.raise_for_status()
             content_type = response.headers.get('Content-Type', '').lower()
-            # Если контент указывает на изображение, отправляем уведомление
             if 'image' in content_type:
                 await update.message.reply_text(
                     "Бот пока что не может скачать картинки с Instagram и TikTok, но AlexProd старается и в будущем добавит эту возможность."
                 )
+                success = True
             elif 'video' in content_type:
                 ext = mimetypes.guess_extension(content_type)
                 if not ext:
@@ -300,16 +393,17 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_stream = BytesIO(response.content)
                 file_stream.name = filename
                 await update.message.reply_video(video=file_stream)
+                success = True
             else:
                 await update.message.reply_text(
                     "Не удалось определить тип медиа. Возможно, ссылка неправильная или недоступна."
                 )
         except Exception:
             logger.error("Ошибка при скачивании напрямую:\n%s", traceback.format_exc())
-            await update.message.reply_text(
-                "Не удалось скачать медиа ни через yt-dlp, ни напрямую. Возможно, ссылка неправильная или недоступна."
-            )
-
+    if not success:
+        await update.message.reply_text(
+            "Не удалось скачать медиа, Возможно, ссылка неправильная или недоступна."
+        )
     await update.message.reply_text(
         "Если хотите, отправьте другую ссылку или нажмите 'В меню' для возврата в главное меню."
     )
@@ -319,8 +413,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Диалог отменён. Введите /start, чтобы начать заново.")
     return ConversationHandler.END
 
-def main():
+# --- Основная функция ---
+async def main_async():
     app = ApplicationBuilder().token(TOKEN).build()
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -331,12 +427,28 @@ def main():
             GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gender)],
             ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_activity)],
             VIDEO: [MessageHandler(filters.TEXT & ~filters.COMMAND, video_by_link)],
+            CURRENCY_FROM: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_from)],
+            CURRENCY_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_to)],
+            CURRENCY_AMOUNT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, currency_amount),
+                MessageHandler(filters.Regex("(?i)(заново|выбрать|валют)"), currency_reselect),
+                MessageHandler(filters.Regex("(?i)(меню)"), currency_reselect),
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     app.add_handler(conv_handler)
+
+    # Регистрация команд, чтобы они отображались в Telegram-клиенте
+    commands = [
+        BotCommand("start", "Начало работы с ботом"),
+        BotCommand("cancel", "Отменить текущий диалог")
+    ]
+    await app.bot.set_my_commands(commands)
+
     logger.info("Бот запущен...")
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main_async())
