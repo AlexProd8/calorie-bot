@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния диалога
+# --------- Состояния диалога ---------
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT = range(7, 10)  # для конвертации валют
 
@@ -36,7 +36,10 @@ AVAILABLE_CURRENCIES = [
     "RUB", "UZS", "BYN", "USD", "EUR", "CHF", "TJS", "KGS"
 ]
 
-# ---------- КЛАВИАТУРЫ ----------
+# Опорная (pivot) валюта – всегда делаем запрос к API с base=USD
+PIVOT = "USD"
+
+# --------- Клавиатуры ---------
 
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
@@ -64,7 +67,7 @@ def currency_keyboard():
     rows.append([BACK_TO_MENU])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
-# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+# --------- Вспомогательные функции ---------
 
 async def check_back_to_menu(text: str, update: Update):
     """Проверяем, не ввёл ли пользователь «В меню»."""
@@ -84,7 +87,7 @@ def expand_url(url: str) -> str:
     except:
         return url
 
-# ---------- ОБРАБОТЧИКИ КОМАНД /start и /cancel ----------
+# --------- /start и /cancel ---------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -98,7 +101,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Диалог отменён. Введите /start, чтобы начать заново.")
     return ConversationHandler.END
 
-# ---------- МЕНЮ ----------
+# --------- Меню ---------
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
@@ -146,7 +149,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# ---------- РАСЧЁТ КАЛОРИЙ ----------
+# --------- Расчёт калорий ---------
 
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -268,7 +271,7 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
-# ---------- КОНВЕРТАЦИЯ ВАЛЮТ ----------
+# --------- Конвертация валют (Pivot=USD) ---------
 
 async def currency_from(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
@@ -309,6 +312,7 @@ async def currency_to(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CURRENCY_AMOUNT
 
 async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вычисляем конвертацию через pivot=USD."""
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
@@ -322,22 +326,43 @@ async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cur_from = context.user_data["currency_from"]
     cur_to = context.user_data["currency_to"]
 
-    url = f"https://api.exchangerate.host/latest?base={cur_from}&symbols={cur_to}"
+    # Сформируем список валют, которые нам нужны (pivot=USD, cur_from, cur_to)
+    # Но проще сразу запросить все AVAILABLE_CURRENCIES, чтобы точно иметь все курсы
+    all_currencies = set(AVAILABLE_CURRENCIES)
+    all_currencies.add(PIVOT)  # "USD"
+    symbols_param = ",".join(all_currencies)  # "RUB,UZS,BYN,USD,EUR,CHF,TJS,KGS"
+
+    # Запрашиваем курс, где base=USD (pivot)
+    url = f"https://api.exchangerate.host/latest?base={PIVOT}&symbols={symbols_param}"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
-        if "rates" not in data or cur_to not in data["rates"]:
+        if "rates" not in data:
             raise ValueError("Невалидный ответ API.")
+        rates = data["rates"]
 
-        rate = data["rates"][cur_to]
-        result = round(rate * amount, 2)
+        # Проверяем, что обе валюты есть в rates
+        if cur_from not in rates or cur_to not in rates:
+            raise ValueError("Одна из валют не поддерживается API.")
+
+        rate_from = rates[cur_from]  # курс USD->cur_from
+        rate_to = rates[cur_to]      # курс USD->cur_to
+        if rate_from == 0:
+            raise ZeroDivisionError("Курс для исходной валюты = 0 (некорректно).")
+
+        # Итоговый курс (cur_from->cur_to) = (USD->cur_to) / (USD->cur_from)
+        rate_final = rate_to / rate_from
+        result = round(rate_final * amount, 2)
+
         message = (
             f"{amount} {cur_from} = {result} {cur_to}\n\n"
             "Хотите выбрать другие валюты или вернуться в меню?"
         )
         keyboard = [["Выбрать валюты заново"], [BACK_TO_MENU]]
         await update.message.reply_text(message, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-    except Exception:
+
+    except Exception as e:
+        logger.error(f"Ошибка при конвертации валют: {e}")
         await update.message.reply_text("Ошибка при получении курса валют. Попробуйте позже.")
         return MENU
 
@@ -358,7 +383,8 @@ async def currency_reselect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# ---------- СКАЧИВАНИЕ ВИДЕО ----------
+# --------- Скачивание видео ---------
+
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -368,7 +394,6 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пожалуйста, отправьте корректную ссылку.")
         return VIDEO
 
-    # Проверяем, что ссылка принадлежит TikTok или Instagram
     allowed_sources = ["tiktok.com", "instagram.com"]
     if not any(domain in text for domain in allowed_sources):
         await update.message.reply_text(
@@ -424,9 +449,7 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.error("Ошибка при скачивании через yt-dlp:\n%s", traceback.format_exc())
 
-    # Если yt-dlp не справился
     if not success:
-        # Пробуем fallback
         try:
             response = requests.get(expanded_url, timeout=15)
             response.raise_for_status()
@@ -463,18 +486,18 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return VIDEO
 
-# ---------- ФУНКЦИЯ POST_INIT ДЛЯ РЕГИСТРАЦИИ КОМАНД ----------
+# --------- Регистрация команд (post_init) ---------
+
 async def set_bot_commands(app):
-    """Эта функция будет вызвана автоматически после инициализации бота."""
     commands = [
         BotCommand("start", "Начало работы с ботом"),
         BotCommand("cancel", "Отменить текущий диалог")
     ]
     await app.bot.set_my_commands(commands)
 
-# ---------- ОСНОВНОЙ MAIN ----------
+# --------- Основной main ---------
+
 def main():
-    # Создаём приложение и регистрируем post_init
     app = ApplicationBuilder().token(TOKEN).post_init(set_bot_commands).build()
 
     conv_handler = ConversationHandler(
