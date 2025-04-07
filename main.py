@@ -26,8 +26,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------- Состояния диалога ----------------
+
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
-CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT = range(7, 10)
+CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT, CURRENCY_RESULT = range(7, 11)
 
 BACK_TO_MENU = "В меню"
 
@@ -35,6 +36,7 @@ BACK_TO_MENU = "В меню"
 AVAILABLE_CURRENCIES = [
     "RUB", "UZS", "BYN", "USD", "EUR", "CHF", "TJS", "KGS"
 ]
+
 # Опорная валюта (pivot)
 PIVOT = "USD"
 
@@ -335,11 +337,11 @@ async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка при конвертации валют: {e}")
         await update.message.reply_text("Ошибка при получении курса валют. Попробуйте позже.")
-        return MENU
+        keyboard = [["Выбрать валюты заново"], [BACK_TO_MENU]]
+        await update.message.reply_text("Хотите выбрать другие валюты или вернуться в меню?", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    return CURRENCY_RESULT
 
-    return CURRENCY_AMOUNT
-
-async def currency_reselect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def currency_result_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
     if "заново" in text or "выбрать" in text or "валют" in text:
         await update.message.reply_text(
@@ -483,11 +485,8 @@ def main():
 
             CURRENCY_FROM: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_from)],
             CURRENCY_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_to)],
-            CURRENCY_AMOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, currency_amount),
-                MessageHandler(filters.Regex("(?i)(заново|выбрать|валют)"), currency_reselect),
-                MessageHandler(filters.Regex("(?i)(меню)"), currency_reselect),
-            ],
+            CURRENCY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_amount)],
+            CURRENCY_RESULT: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_result_choice)],
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
