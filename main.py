@@ -25,21 +25,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --------- Состояния диалога ---------
+# ---------------- Состояния диалога ----------------
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
-CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT = range(7, 10)  # для конвертации валют
+CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT = range(7, 10)
 
 BACK_TO_MENU = "В меню"
 
-# Список доступных валют
+# Список валют
 AVAILABLE_CURRENCIES = [
     "RUB", "UZS", "BYN", "USD", "EUR", "CHF", "TJS", "KGS"
 ]
-
-# Опорная (pivot) валюта – всегда делаем запрос к API с base=USD
+# Опорная валюта (pivot)
 PIVOT = "USD"
 
-# --------- Клавиатуры ---------
+# ---------------- Клавиатуры ----------------
 
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
@@ -54,7 +53,7 @@ def main_menu_keyboard():
     )
 
 def currency_keyboard():
-    """Клавиатура со списком доступных валют (по 3 на строку)."""
+    """Возвращает клавиатуру со списком валют (по 3 в строке)."""
     rows = []
     row = []
     for i, cur in enumerate(AVAILABLE_CURRENCIES, start=1):
@@ -67,10 +66,9 @@ def currency_keyboard():
     rows.append([BACK_TO_MENU])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
-# --------- Вспомогательные функции ---------
+# ---------------- Вспомогательные функции ----------------
 
 async def check_back_to_menu(text: str, update: Update):
-    """Проверяем, не ввёл ли пользователь «В меню»."""
     if text.strip().lower() == BACK_TO_MENU.lower():
         await update.message.reply_text(
             "Вы вернулись в главное меню. Что хотите сделать?",
@@ -84,10 +82,10 @@ def expand_url(url: str) -> str:
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
         return r.url
-    except:
+    except Exception:
         return url
 
-# --------- /start и /cancel ---------
+# ---------------- Команды /start и /cancel ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -101,47 +99,41 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Диалог отменён. Введите /start, чтобы начать заново.")
     return ConversationHandler.END
 
-# --------- Меню ---------
+# ---------------- Главное меню ----------------
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
-
     if "калори" in text:
         await update.message.reply_text(
             "Введите ваш рост в сантиметрах:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return HEIGHT
-
     elif "ссыл" in text:
         await update.message.reply_text(
             "Отправьте ссылку на видео с TikTok или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
-
     elif "информа" in text:
         info_text = (
             "Это бот, который умеет:\n"
-            "• Рассчитывать норму калорий.\n"
+            "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
             "• Загружать видео с TikTok и Instagram.\n"
             "• Конвертировать валюты.\n\n"
-            "Обратите внимание: бот пока не умеет скачивать картинки с Instagram и TikTok.\n"
+            "Обратите внимание: бот пока не умеет скачивать картинки с Instagram и TikTok. "
             "Если вы отправите ссылку на изображение, бот ответит, что эта функция в разработке.\n\n"
             "Разработчик – AlexProd.\n"
             "Спасибо, что используете бота!"
         )
         await update.message.reply_text(info_text, reply_markup=main_menu_keyboard())
         return MENU
-
     elif "валют" in text or "конвер" in text:
-        # Переходим к выбору исходной валюты
         await update.message.reply_text(
             "Выберите валюту, из которой конвертируем:",
             reply_markup=currency_keyboard()
         )
         return CURRENCY_FROM
-
     else:
         await update.message.reply_text(
             "Пожалуйста, выберите действие из меню.",
@@ -149,7 +141,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# --------- Расчёт калорий ---------
+# ---------------- Расчёт калорий ----------------
 
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -207,7 +199,6 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup([["Мужчина", "Женщина"], [BACK_TO_MENU]], resize_keyboard=True)
         )
         return GENDER
-
     context.user_data["gender"] = text.title()
     keyboard = [["1", "2"], ["3", "4"], ["5"], [BACK_TO_MENU]]
     message = (
@@ -218,10 +209,7 @@ async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "4. Высокая активность (1.725)\n"
         "5. Очень высокая (1.9)"
     )
-    await update.message.reply_text(
-        message,
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
+    await update.message.reply_text(message, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
     return ACTIVITY
 
 async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -233,9 +221,7 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text not in activity_mapping:
         await update.message.reply_text("Пожалуйста, выберите цифру от 1 до 5 или нажмите 'В меню'.")
         return ACTIVITY
-
     context.user_data["activity"] = activity_mapping[text]
-
     try:
         height = context.user_data["height"]
         weight = context.user_data["weight"]
@@ -271,7 +257,7 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MENU
 
-# --------- Конвертация валют (Pivot=USD) ---------
+# ---------------- Конвертация валют ----------------
 
 async def currency_from(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
@@ -312,11 +298,9 @@ async def currency_to(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CURRENCY_AMOUNT
 
 async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Вычисляем конвертацию через pivot=USD."""
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
         return MENU
-
     try:
         amount = float(text)
     except ValueError:
@@ -326,41 +310,28 @@ async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cur_from = context.user_data["currency_from"]
     cur_to = context.user_data["currency_to"]
 
-    # Сформируем список валют, которые нам нужны (pivot=USD, cur_from, cur_to)
-    # Но проще сразу запросить все AVAILABLE_CURRENCIES, чтобы точно иметь все курсы
-    all_currencies = set(AVAILABLE_CURRENCIES)
-    all_currencies.add(PIVOT)  # "USD"
-    symbols_param = ",".join(all_currencies)  # "RUB,UZS,BYN,USD,EUR,CHF,TJS,KGS"
-
-    # Запрашиваем курс, где base=USD (pivot)
-    url = f"https://api.exchangerate.host/latest?base={PIVOT}&symbols={symbols_param}"
+    # Запрашиваем данные у open.er-api.com с базой USD (опорная валюта)
+    url = f"https://open.er-api.com/v6/latest/{PIVOT}"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
-        if "rates" not in data:
+        if data.get("result") != "success" or "rates" not in data:
             raise ValueError("Невалидный ответ API.")
         rates = data["rates"]
-
-        # Проверяем, что обе валюты есть в rates
         if cur_from not in rates or cur_to not in rates:
             raise ValueError("Одна из валют не поддерживается API.")
-
-        rate_from = rates[cur_from]  # курс USD->cur_from
-        rate_to = rates[cur_to]      # курс USD->cur_to
+        rate_from = rates[cur_from]  # USD->cur_from
+        rate_to = rates[cur_to]      # USD->cur_to
         if rate_from == 0:
-            raise ZeroDivisionError("Курс для исходной валюты = 0 (некорректно).")
-
-        # Итоговый курс (cur_from->cur_to) = (USD->cur_to) / (USD->cur_from)
+            raise ZeroDivisionError("Курс для исходной валюты равен 0.")
         rate_final = rate_to / rate_from
         result = round(rate_final * amount, 2)
-
         message = (
             f"{amount} {cur_from} = {result} {cur_to}\n\n"
             "Хотите выбрать другие валюты или вернуться в меню?"
         )
         keyboard = [["Выбрать валюты заново"], [BACK_TO_MENU]]
         await update.message.reply_text(message, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-
     except Exception as e:
         logger.error(f"Ошибка при конвертации валют: {e}")
         await update.message.reply_text("Ошибка при получении курса валют. Попробуйте позже.")
@@ -383,7 +354,7 @@ async def currency_reselect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# --------- Скачивание видео ---------
+# ---------------- Скачивание видео ----------------
 
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -430,7 +401,6 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(expanded_url, download=True)
                 filename = ydl.prepare_filename(info_dict)
-
             ext = os.path.splitext(filename)[1].lower()
             if ext in ['.mp4', '.mov', '.mkv', '.webm']:
                 with open(filename, 'rb') as media_file:
@@ -438,8 +408,7 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 success = True
             elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
                 await update.message.reply_text(
-                    "Бот пока что не может скачать картинки с Instagram и TikTok, "
-                    "но AlexProd старается и в будущем добавит эту возможность."
+                    "Бот пока что не может скачать картинки с Instagram и TikTok, но AlexProd старается и в будущем добавит эту возможность."
                 )
                 success = True
             else:
@@ -456,8 +425,7 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             content_type = response.headers.get('Content-Type', '').lower()
             if 'image' in content_type:
                 await update.message.reply_text(
-                    "Бот пока что не может скачать картинки с Instagram и TikTok, "
-                    "но AlexProd старается и в будущем добавит эту возможность."
+                    "Бот пока что не может скачать картинки с Instagram и TikTok, но AlexProd старается и в будущем добавит эту возможность."
                 )
                 success = True
             elif 'video' in content_type:
@@ -486,7 +454,7 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return VIDEO
 
-# --------- Регистрация команд (post_init) ---------
+# ---------------- Регистрация команд (post_init) ----------------
 
 async def set_bot_commands(app):
     commands = [
@@ -495,7 +463,7 @@ async def set_bot_commands(app):
     ]
     await app.bot.set_my_commands(commands)
 
-# --------- Основной main ---------
+# ---------------- Основной main ----------------
 
 def main():
     app = ApplicationBuilder().token(TOKEN).post_init(set_bot_commands).build()
@@ -513,7 +481,6 @@ def main():
 
             VIDEO: [MessageHandler(filters.TEXT & ~filters.COMMAND, video_by_link)],
 
-            # Блок конвертации валют
             CURRENCY_FROM: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_from)],
             CURRENCY_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_to)],
             CURRENCY_AMOUNT: [
@@ -526,7 +493,6 @@ def main():
     )
 
     app.add_handler(conv_handler)
-
     logger.info("Бот запущен...")
     app.run_polling()
 
