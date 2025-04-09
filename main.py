@@ -491,7 +491,7 @@ async def set_bot_commands(app):
     ]
     await app.bot.set_my_commands(commands)
 
-# --------------- Основной main ---------------
+# --------------- Основной main ----------------
 def main():
     app = ApplicationB
     import asyncio
