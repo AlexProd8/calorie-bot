@@ -491,6 +491,12 @@ async def set_bot_commands(app):
     ]
     await app.bot.set_my_commands(commands)
 
-# ---------------- Основной main ----------------
+# --------------- Основной main ---------------
 def main():
     app = ApplicationB
+    import asyncio
+    asyncio.run(app.run_polling())
+
+if __name__ == "__main__":
+    print("Bot is starting...")
+    main()
