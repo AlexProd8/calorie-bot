@@ -493,7 +493,7 @@ async def set_bot_commands(app):
 
 # --------------- Основной main ----------------
 def main():
-    app = ApplicationB
+    app = ApplicationB()
     import asyncio
     asyncio.run(app.run_polling())
 
