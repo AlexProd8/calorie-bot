@@ -1,5 +1,6 @@
 import logging
 import os
+import datetime
 import tempfile
 import traceback
 import requests
@@ -16,9 +17,11 @@ from telegram.ext import (
 )
 from yt_dlp import YoutubeDL
 
-# Получаем токен из переменных окружения (Railway задаёт его через настройки)
+# Получаем токен и идентификатор админ-чата (или администратора) из переменных окружения
 TOKEN = os.environ.get("TOKEN")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")  # Задайте этот ID в настройках Railway или GitHub
 
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -26,36 +29,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------- Состояния диалога ----------------
-
+# Состояния для расчёта калорий, видео и валют совпадают с прежними
 MENU, HEIGHT, WEIGHT, AGE, GENDER, ACTIVITY, VIDEO = range(7)
 CURRENCY_FROM, CURRENCY_TO, CURRENCY_AMOUNT, CURRENCY_RESULT = range(7, 11)
+FEEDBACK = 11  # Новое состояние для ввода отзыва
 
 BACK_TO_MENU = "В меню"
-
-# Список валют
-AVAILABLE_CURRENCIES = [
-    "RUB", "UZS", "BYN", "USD", "EUR", "CHF", "TJS", "KGS"
-]
-
-# Опорная валюта (pivot)
+AVAILABLE_CURRENCIES = [ "RUB", "UZS", "BYN", "USD", "EUR", "CHF", "TJS", "KGS" ]
 PIVOT = "USD"
 
 # ---------------- Клавиатуры ----------------
-
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
         [
             ["Рассчитать калории"],
             ["Видео по вашей ссылке"],
             ["Конвертация валют"],
-            ["Информация"]
+            ["Информация"],
+            ["Оставить отзыв"]  # Новая кнопка для отзывов
         ],
         one_time_keyboard=True,
         resize_keyboard=True
     )
 
 def currency_keyboard():
-    """Возвращает клавиатуру со списком валют (по 3 в строке)."""
     rows = []
     row = []
     for i, cur in enumerate(AVAILABLE_CURRENCIES, start=1):
@@ -68,8 +65,24 @@ def currency_keyboard():
     rows.append([BACK_TO_MENU])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
-# ---------------- Вспомогательные функции ----------------
+# ---------------- Функция логирования команд ----------------
+def log_command(update: Update, command_name: str):
+    user = update.effective_user
+    log_message = f"{datetime.datetime.now()}: Команда {command_name} вызвана пользователем {user.id} - {user.username} - {user.first_name}"
+    logger.info(log_message)
+    # Записываем в файл для лога использования (можно использовать другие способы хранения)
+    with open("bot_usage.log", "a", encoding="utf-8") as log_file:
+        log_file.write(log_message + "\n")
 
+# ---------------- Отслеживание пользователей ----------------
+def log_user_start(update: Update):
+    user = update.effective_user
+    log_line = f"{datetime.datetime.now()}, {user.id}, {user.username}, {user.first_name}\n"
+    with open("user_data.csv", "a", encoding="utf-8") as f:
+        f.write(log_line)
+    logger.info(f"Зарегистрирован пользователь: {user.id} - {user.username} - {user.first_name}")
+
+# ---------------- Вспомогательные функции ----------------
 async def check_back_to_menu(text: str, update: Update):
     if text.strip().lower() == BACK_TO_MENU.lower():
         await update.message.reply_text(
@@ -80,7 +93,6 @@ async def check_back_to_menu(text: str, update: Update):
     return False
 
 def expand_url(url: str) -> str:
-    """Раскрывает короткую ссылку (например, vm.tiktok.com) через HEAD-запрос."""
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
         return r.url
@@ -88,8 +100,9 @@ def expand_url(url: str) -> str:
         return url
 
 # ---------------- Команды /start и /cancel ----------------
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command(update, "/start")
+    log_user_start(update)
     context.user_data.clear()
     await update.message.reply_text(
         "Привет! Что вы хотите сделать?",
@@ -98,26 +111,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MENU
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command(update, "/cancel")
     await update.message.reply_text("Диалог отменён. Введите /start, чтобы начать заново.")
     return ConversationHandler.END
 
 # ---------------- Главное меню ----------------
-
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
     if "калори" in text:
+        log_command(update, "Рассчитать калории")
         await update.message.reply_text(
             "Введите ваш рост в сантиметрах:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return HEIGHT
     elif "ссыл" in text:
+        log_command(update, "Видео по вашей ссылке")
         await update.message.reply_text(
             "Отправьте ссылку на видео с TikTok или Instagram:",
             reply_markup=ReplyKeyboardMarkup([[BACK_TO_MENU]], resize_keyboard=True)
         )
         return VIDEO
     elif "информа" in text:
+        log_command(update, "Информация")
         info_text = (
             "Это бот, который умеет:\n"
             "• Рассчитывать норму калорий на основе введённых параметров (рост, вес, возраст, пол, уровень активности).\n"
@@ -131,11 +147,16 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(info_text, reply_markup=main_menu_keyboard())
         return MENU
     elif "валют" in text or "конвер" in text:
+        log_command(update, "Конвертация валют")
         await update.message.reply_text(
             "Выберите валюту, из которой конвертируем:",
             reply_markup=currency_keyboard()
         )
         return CURRENCY_FROM
+    elif "отзыв" in text:
+        log_command(update, "Оставить отзыв")
+        await update.message.reply_text("Пожалуйста, введите ваш отзыв:")
+        return FEEDBACK
     else:
         await update.message.reply_text(
             "Пожалуйста, выберите действие из меню.",
@@ -143,8 +164,25 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return MENU
 
-# ---------------- Расчёт калорий ----------------
+# ---------------- Раздел отзывов ----------------
+async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    feedback_text = update.message.text.strip()
+    user = update.effective_user
+    # Формирование сообщения с данными пользователя и текстом отзыва
+    feedback_message = (
+        f"Новый отзыв от {user.first_name} (ID: {user.id}, username: {user.username}):\n"
+        f"{feedback_text}"
+    )
+    try:
+        # Отправляем отзыв в админ-чат
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=feedback_message)
+        logger.info(f"Отзыв от {user.id} отправлен администратору.")
+    except Exception as e:
+        logger.error(f"Ошибка отправки отзыва: {e}")
+    await update.message.reply_text("Спасибо за ваш отзыв!")
+    return MENU
 
+# ---------------- Функции для расчёта калорий ----------------
 async def get_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -236,12 +274,10 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     height_m = height / 100
     imt = round(weight / (height_m ** 2), 2)
-
     if gender == "Мужчина":
         bmr = round((10 * weight) + (6.25 * height - 5 * age + 5))
     else:
         bmr = round((10 * weight) + (6.25 * height - 5 * age - 161))
-
     tdee = round(bmr * activity)
 
     if imt < 18.5:
@@ -260,7 +296,6 @@ async def get_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MENU
 
 # ---------------- Конвертация валют ----------------
-
 async def currency_from(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
     if await check_back_to_menu(text, update):
@@ -311,8 +346,6 @@ async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cur_from = context.user_data["currency_from"]
     cur_to = context.user_data["currency_to"]
-
-    # Запрашиваем данные у open.er-api.com с базой USD (опорная валюта)
     url = f"https://open.er-api.com/v6/latest/{PIVOT}"
     try:
         response = requests.get(url, timeout=10)
@@ -322,8 +355,8 @@ async def currency_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rates = data["rates"]
         if cur_from not in rates or cur_to not in rates:
             raise ValueError("Одна из валют не поддерживается API.")
-        rate_from = rates[cur_from]  # USD->cur_from
-        rate_to = rates[cur_to]      # USD->cur_to
+        rate_from = rates[cur_from]
+        rate_to = rates[cur_to]
         if rate_from == 0:
             raise ZeroDivisionError("Курс для исходной валюты равен 0.")
         rate_final = rate_to / rate_from
@@ -357,7 +390,6 @@ async def currency_result_choice(update: Update, context: ContextTypes.DEFAULT_T
         return MENU
 
 # ---------------- Скачивание видео ----------------
-
 async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if await check_back_to_menu(text, update):
@@ -376,7 +408,6 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("Скачиваю медиа, пожалуйста, подождите...")
     expanded_url = expand_url(text)
-
     if "instagram.com" in expanded_url:
         referer = "https://www.instagram.com/"
     else:
@@ -395,7 +426,6 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'geo_bypass_country': 'US',
         'noprogress': True
     }
-
     success = False
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
@@ -419,7 +449,6 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 success = True
     except Exception:
         logger.error("Ошибка при скачивании через yt-dlp:\n%s", traceback.format_exc())
-
     if not success:
         try:
             response = requests.get(expanded_url, timeout=15)
@@ -445,19 +474,16 @@ async def video_by_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         except Exception:
             logger.error("Ошибка при скачивании напрямую:\n%s", traceback.format_exc())
-
     if not success:
         await update.message.reply_text(
             "Не удалось скачать медиа, Возможно, ссылка неправильная или недоступна."
         )
-
     await update.message.reply_text(
         "Если хотите, отправьте другую ссылку или нажмите 'В меню' для возврата в главное меню."
     )
     return VIDEO
 
-# ---------------- Регистрация команд (post_init) ----------------
-
+# ---------------- Регистрация команд ----------------
 async def set_bot_commands(app):
     commands = [
         BotCommand("start", "Начало работы с ботом"),
@@ -466,34 +492,5 @@ async def set_bot_commands(app):
     await app.bot.set_my_commands(commands)
 
 # ---------------- Основной main ----------------
-
 def main():
-    app = ApplicationBuilder().token(TOKEN).post_init(set_bot_commands).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu)],
-
-            HEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_height)],
-            WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)],
-            AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_age)],
-            GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gender)],
-            ACTIVITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_activity)],
-
-            VIDEO: [MessageHandler(filters.TEXT & ~filters.COMMAND, video_by_link)],
-
-            CURRENCY_FROM: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_from)],
-            CURRENCY_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_to)],
-            CURRENCY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_amount)],
-            CURRENCY_RESULT: [MessageHandler(filters.TEXT & ~filters.COMMAND, currency_result_choice)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)]
-    )
-
-    app.add_handler(conv_handler)
-    logger.info("Бот запущен...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    app = ApplicationB
